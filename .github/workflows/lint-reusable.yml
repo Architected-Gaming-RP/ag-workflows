@@ -116,6 +116,16 @@ jobs:
           except (FileNotFoundError, ET.ParseError):
               pass
 
+          # DEBUG: dump junit.xml content to understand what luacheck writes
+          print("=== DEBUG: junit.xml content ===")
+          try:
+              with open("junit.xml", "r", errors="replace") as dbg:
+                  for i, line in enumerate(dbg):
+                      print(f"  [{i}] {repr(line.rstrip())}")
+          except FileNotFoundError:
+              print("  FILE NOT FOUND")
+          print("=== END DEBUG ===")
+
           # Fallback: job failed but JUnit found 0 errors.
           # Syntax errors produce valid-but-empty JUnit XML (0 testcases) or
           # malformed XML. Either way the JUnit parser finds nothing.
