@@ -50,9 +50,7 @@ jobs:
           import json, os, urllib.request, xml.etree.ElementTree as ET
 
           webhook = os.environ.get("WEBHOOK_URL", "")
-          if not webhook:
-              print("::warning::DISCORD_LINT_WEBHOOK secret not set — skipping")
-              exit(0)
+          errors_webhook = os.environ.get("ERRORS_WEBHOOK_URL", "")
 
           job_status = os.environ["JOB_STATUS"]
           repo = os.environ["REPO"]
@@ -120,34 +118,22 @@ jobs:
               }]
           })
 
-          req = urllib.request.Request(
-              webhook,
-              data=payload.encode(),
-              headers={
-                  "Content-Type": "application/json",
-                  "User-Agent": "AG-Lint-Bot/1.0"
-              },
-              method="POST"
-          )
-          try:
-              urllib.request.urlopen(req)
-          except Exception as e:
-              print(f"::warning::Discord webhook failed: {e}")
-
-          # Errors-only webhook — only fires when there are lint failures
-          errors_webhook = os.environ.get("ERRORS_WEBHOOK_URL", "")
-          if errors_webhook and failed > 0:
-              err_req = urllib.request.Request(
-                  errors_webhook,
-                  data=payload.encode(),
-                  headers={
-                      "Content-Type": "application/json",
-                      "User-Agent": "AG-Lint-Bot/1.0"
-                  },
-                  method="POST"
-              )
-              try:
-                  urllib.request.urlopen(err_req)
-              except Exception as e:
-                  print(f"::warning::Discord errors webhook failed: {e}")
+          # Both webhooks only fire on failures
+          if failed > 0:
+              for wh_url in [webhook, errors_webhook]:
+                  if not wh_url:
+                      continue
+                  req = urllib.request.Request(
+                      wh_url,
+                      data=payload.encode(),
+                      headers={
+                          "Content-Type": "application/json",
+                          "User-Agent": "AG-Lint-Bot/1.0"
+                      },
+                      method="POST"
+                  )
+                  try:
+                      urllib.request.urlopen(req)
+                  except Exception as e:
+                      print(f"::warning::Discord webhook failed: {e}")
           PYEOF
