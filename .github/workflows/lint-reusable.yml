@@ -57,15 +57,6 @@ jobs:
           args: "-t --ignore 1 2 3 4 5 6 --formatter JUnit"
           extra_libs: ox_lib+mysql+qblocales+qbox+qbox_playerdata+qbox_lib
 
-      # DEBUG: upload junit.xml as artifact so we can inspect actual content
-      - name: Upload junit.xml
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: junit-xml
-          path: junit.xml
-          retention-days: 1
-
       - name: Generate Lint Report
         if: always()
         uses: mikepenz/action-junit-report@v4
