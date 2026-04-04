@@ -54,7 +54,7 @@ jobs:
         uses: iLLeniumStudios/fivem-lua-lint-action@v2
         with:
           capture: "junit.xml"
-          args: "-t --formatter JUnit --ignore 1 2 3 4 5 6 --"
+          args: "-t --ignore 1 2 3 4 5 6 --formatter JUnit"
           extra_libs: ox_lib+mysql+qblocales+qbox+qbox_playerdata+qbox_lib
 
       # DEBUG: upload junit.xml as artifact so we can inspect actual content
