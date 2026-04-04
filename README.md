@@ -32,6 +32,11 @@ jobs:
     secrets: inherit
 ```
 
-**Discord notifications:** Set the `DISCORD_LINT_WEBHOOK` secret on each repo (or skip it — the workflow handles missing secrets gracefully).
+**Discord notifications** are sent via two org-level secrets (set on the Architected-Gaming-RP org, inherited by all repos via `secrets: inherit`):
 
-**Changing to failure-only Discord notifications:** Edit `lint-reusable.yml` and change the Discord step's `if: always()` to `if: failure()`.
+| Secret | Fires on | Discord Channel Purpose |
+|--------|----------|------------------------|
+| `DISCORD_LINT_WEBHOOK` | Every run (pass + fail) | All lint results — visibility into what's being pushed |
+| `DISCORD_LINT_ERRORS_WEBHOOK` | Failures only | Errors channel — only surfaces problems that need attention |
+
+Both secrets are optional — the workflow handles missing secrets gracefully.
