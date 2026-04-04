@@ -24,7 +24,6 @@ jobs:
         run: |
           fxap=0
           ignore=0
-          pattern=0
 
           # 1. Remove FXAP-encrypted files (magic bytes 0x46584150)
           find . -name '*.lua' -not -path './.git/*' | while IFS= read -r f; do
@@ -35,20 +34,8 @@ jobs:
             fi
           done
 
-          # 2. Remove common non-code .lua files (install docs, READMEs, item snippets)
-          for f in $(find . -not -path './.git/*' -name '*.lua' \( \
-            -name 'README.lua' -o \
-            -path '*/_INSTALL/*' -o \
-            -path '*/install/*' -o \
-            -path '*/installfolder/*' -o \
-            -path '*/extras/items/*' \
-          \) 2>/dev/null); do
-            rm -f "$f"
-            pattern=$((pattern + 1))
-          done
-
-          # 3. Honor per-repo .lintignore (one glob pattern per line)
-          #    Users can add patterns like: extras/**/*.lua or config/old_*.lua
+          # 2. Honor per-repo .lintignore (one glob pattern per line)
+          #    Add non-code .lua files here (install snippets, READMEs, etc.)
           if [ -f .lintignore ]; then
             while IFS= read -r line || [ -n "$line" ]; do
               line=$(echo "$line" | sed 's/#.*//' | xargs)
@@ -60,7 +47,7 @@ jobs:
             done < .lintignore
           fi
 
-          echo "Excluded: $fxap FXAP, $pattern install/readme, $ignore .lintignore"
+          echo "Excluded: $fxap FXAP, $ignore .lintignore"
       # AG UPDATE END
 
       - name: Lint
