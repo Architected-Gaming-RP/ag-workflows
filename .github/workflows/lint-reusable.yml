@@ -32,93 +32,99 @@ jobs:
           check_name: Linting Report
           fail_on_failure: true
 
-      - name: Parse Lint Results
-        if: always()
-        id: parse
-        run: |
-          if [ ! -f junit.xml ]; then
-            echo "summary=No lint output found" >> "$GITHUB_OUTPUT"
-            echo "errors=" >> "$GITHUB_OUTPUT"
-            echo "passed=0" >> "$GITHUB_OUTPUT"
-            echo "failed=0" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          TOTAL=$(grep -c '<testcase' junit.xml 2>/dev/null || echo "0")
-          FAILURES=$(grep -c '<failure' junit.xml 2>/dev/null || echo "0")
-          PASSED=$((TOTAL - FAILURES))
-
-          echo "passed=$PASSED" >> "$GITHUB_OUTPUT"
-          echo "failed=$FAILURES" >> "$GITHUB_OUTPUT"
-
-          if [ "$FAILURES" -gt 0 ]; then
-            # Extract error details: file, line, message
-            ERRORS=$(python3 -c "
-          import xml.etree.ElementTree as ET
-          tree = ET.parse('junit.xml')
-          errors = []
-          for tc in tree.iter('testcase'):
-              failure = tc.find('failure')
-              if failure is not None:
-                  name = tc.get('name', 'unknown')
-                  classname = tc.get('classname', '')
-                  msg = failure.get('message', failure.text or 'lint error')
-                  # Truncate long messages
-                  if len(msg) > 200:
-                      msg = msg[:200] + '...'
-                  errors.append(f'• \`{classname}\`: {msg}')
-          # Limit to 10 errors to fit Discord embed
-          output = chr(10).join(errors[:10])
-          if len(errors) > 10:
-              output += f'{chr(10)}... and {len(errors) - 10} more'
-          print(output)
-          " 2>/dev/null || echo "Failed to parse error details")
-
-            # Use a delimiter for multiline output
-            EOF_MARKER=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-            echo "errors<<${EOF_MARKER}" >> "$GITHUB_OUTPUT"
-            echo "$ERRORS" >> "$GITHUB_OUTPUT"
-            echo "${EOF_MARKER}" >> "$GITHUB_OUTPUT"
-          else
-            echo "errors=" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Discord Notification
         if: always()
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_LINT_WEBHOOK }}
+          JOB_STATUS: ${{ job.status }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          PASSED="${{ steps.parse.outputs.passed }}"
-          FAILED="${{ steps.parse.outputs.failed }}"
-          ERRORS="${{ steps.parse.outputs.errors }}"
+          python3 << 'PYEOF'
+          import json, os, urllib.request, xml.etree.ElementTree as ET
 
-          if [ "${{ job.status }}" = "success" ]; then
-            COLOR=3066993
-            STATUS="✅ Passed"
-          else
-            COLOR=15158332
-            STATUS="❌ Failed"
-          fi
+          webhook = os.environ.get("WEBHOOK_URL", "")
+          if not webhook:
+              print("::warning::DISCORD_LINT_WEBHOOK secret not set — skipping")
+              exit(0)
 
-          DESC="${STATUS}\n\n"
-          DESC+="**Tests:** ${PASSED} passed"
-          if [ "$FAILED" != "0" ] && [ -n "$FAILED" ]; then
-            DESC+=", ${FAILED} failed"
-          fi
-          DESC+="\n**Branch:** \`${{ github.ref_name }}\`"
-          DESC+="\n**Commit:** [\`${GITHUB_SHA:0:7}\`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})"
-          DESC+="\n**By:** ${{ github.actor }}"
+          job_status = os.environ["JOB_STATUS"]
+          repo = os.environ["REPO"]
+          branch = os.environ["BRANCH"]
+          sha = os.environ["SHA"]
+          actor = os.environ["ACTOR"]
+          run_id = os.environ["RUN_ID"]
+          short_sha = sha[:7]
 
-          if [ -n "$ERRORS" ]; then
-            DESC+="\n\n**Errors:**\n${ERRORS}"
-          fi
+          # Parse JUnit results
+          passed = 0
+          failed = 0
+          errors = []
+          try:
+              tree = ET.parse("junit.xml")
+              for tc in tree.iter("testcase"):
+                  f = tc.find("failure")
+                  if f is not None:
+                      failed += 1
+                      classname = tc.get("classname", "")
+                      msg = f.get("message", "") or (f.text or "lint error")
+                      if len(msg) > 200:
+                          msg = msg[:200] + "..."
+                      errors.append(f"\u2022 `{classname}`: {msg}")
+                  else:
+                      passed += 1
+          except FileNotFoundError:
+              pass
 
-          # Escape for JSON
-          DESC_JSON=$(echo "$DESC" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read())[1:-1])")
+          # Build description
+          if job_status == "success":
+              color = 3066993   # green
+              status = "\u2705 Passed"
+          else:
+              color = 15158332  # red
+              status = "\u274c Failed"
 
-          PAYLOAD="{\"embeds\":[{\"title\":\"Lint — ${{ github.repository }}\",\"description\":\"${DESC_JSON}\",\"color\":${COLOR},\"url\":\"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}]}"
+          lines = [
+              f"{status}\n",
+              f"**Tests:** {passed} passed" + (f", {failed} failed" if failed else ""),
+              f"**Branch:** `{branch}`",
+              f"**Commit:** [`{short_sha}`](https://github.com/{repo}/commit/{sha})",
+              f"**By:** {actor}",
+          ]
 
-          WEBHOOK="${{ secrets.DISCORD_LINT_WEBHOOK }}"
-          if [ -n "$WEBHOOK" ]; then
-            curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK"
-          else
-            echo "::warning::DISCORD_LINT_WEBHOOK secret not set — skipping Discord notification"
-          fi
+          if errors:
+              lines.append("")
+              lines.append("**Errors:**")
+              lines.extend(errors[:10])
+              if len(errors) > 10:
+                  lines.append(f"... and {len(errors) - 10} more")
+
+          desc = "\n".join(lines)
+
+          # Discord limits embed description to 4096 chars
+          if len(desc) > 4000:
+              desc = desc[:4000] + "\n... (truncated)"
+
+          payload = json.dumps({
+              "embeds": [{
+                  "title": f"Lint \u2014 {repo}",
+                  "description": desc,
+                  "color": color,
+                  "url": f"https://github.com/{repo}/actions/runs/{run_id}"
+              }]
+          })
+
+          req = urllib.request.Request(
+              webhook,
+              data=payload.encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST"
+          )
+          try:
+              urllib.request.urlopen(req)
+          except Exception as e:
+              print(f"::warning::Discord webhook failed: {e}")
+          PYEOF
