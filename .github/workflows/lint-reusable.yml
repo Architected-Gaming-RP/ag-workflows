@@ -120,7 +120,10 @@ jobs:
           req = urllib.request.Request(
               webhook,
               data=payload.encode(),
-              headers={"Content-Type": "application/json"},
+              headers={
+                  "Content-Type": "application/json",
+                  "User-Agent": "AG-Lint-Bot/1.0"
+              },
               method="POST"
           )
           try:
