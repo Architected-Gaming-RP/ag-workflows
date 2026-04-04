@@ -5,6 +5,8 @@ on:
     secrets:
       DISCORD_LINT_WEBHOOK:
         required: false
+      DISCORD_LINT_ERRORS_WEBHOOK:
+        required: false
 
 jobs:
   lint:
@@ -36,6 +38,7 @@ jobs:
         if: always()
         env:
           WEBHOOK_URL: ${{ secrets.DISCORD_LINT_WEBHOOK }}
+          ERRORS_WEBHOOK_URL: ${{ secrets.DISCORD_LINT_ERRORS_WEBHOOK }}
           JOB_STATUS: ${{ job.status }}
           REPO: ${{ github.repository }}
           BRANCH: ${{ github.ref_name }}
@@ -130,4 +133,21 @@ jobs:
               urllib.request.urlopen(req)
           except Exception as e:
               print(f"::warning::Discord webhook failed: {e}")
+
+          # Errors-only webhook — only fires when there are lint failures
+          errors_webhook = os.environ.get("ERRORS_WEBHOOK_URL", "")
+          if errors_webhook and failed > 0:
+              err_req = urllib.request.Request(
+                  errors_webhook,
+                  data=payload.encode(),
+                  headers={
+                      "Content-Type": "application/json",
+                      "User-Agent": "AG-Lint-Bot/1.0"
+                  },
+                  method="POST"
+              )
+              try:
+                  urllib.request.urlopen(err_req)
+              except Exception as e:
+                  print(f"::warning::Discord errors webhook failed: {e}")
           PYEOF
