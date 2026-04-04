@@ -57,6 +57,15 @@ jobs:
           args: "-t --formatter JUnit --ignore 1 2 3 4 5 6"
           extra_libs: ox_lib+mysql+qblocales+qbox+qbox_playerdata+qbox_lib
 
+      # DEBUG: upload junit.xml as artifact so we can inspect actual content
+      - name: Upload junit.xml
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-xml
+          path: junit.xml
+          retention-days: 1
+
       - name: Generate Lint Report
         if: always()
         uses: mikepenz/action-junit-report@v4
@@ -65,20 +74,6 @@ jobs:
           report_paths: "**/junit.xml"
           check_name: Linting Report
           fail_on_failure: true
-
-      # AG [I] 04APR26 - UPDATE - Capture lint errors to a reliable file for Discord
-      # junit.xml is unreliable for syntax errors (empty or malformed).
-      # Re-run luacheck with default formatter in the same cached Docker image.
-      - name: Capture Lint Errors
-        if: failure()
-        run: |
-          docker run --rm --entrypoint sh \
-            -v "$PWD:/workspace" -w /workspace \
-            ghcr.io/illeniumstudios/luacheck:v1.1.1-fivem-lua-v1.3.1 \
-            -c "luacheck --ignore 1 2 3 4 5 6 . 2>&1" > lint-output.txt || true
-          echo "=== lint-output.txt ==="
-          cat lint-output.txt
-      # AG UPDATE END
 
       - name: Discord Notification
         if: always()
@@ -106,21 +101,25 @@ jobs:
           run_id = os.environ["RUN_ID"]
           short_sha = sha[:7]
 
-          # AG [I] 04APR26 - UPDATE - JUnit primary + lint-output.txt fallback for syntax errors
+          # AG [I] 04APR26 - UPDATE - Parse both <failure> (lint) and <error> (syntax) elements
+          # luacheck JUnit formatter uses <failure> for lint warnings/errors and
+          # <error> for fatal errors like syntax errors (F2 code)
           lua_error_re = re.compile(r'\S+\.lua:\d+:\d+:')
 
-          # Primary: parse JUnit XML (works for lint warnings/errors)
           passed = 0
           failed = 0
           errors = []
           try:
               tree = ET.parse("junit.xml")
               for tc in tree.iter("testcase"):
-                  fl = tc.find("failure")
-                  if fl is not None:
+                  # Check both <failure> (lint issues) and <error> (syntax errors)
+                  issue = tc.find("failure")
+                  if issue is None:
+                      issue = tc.find("error")
+                  if issue is not None:
                       failed += 1
                       classname = tc.get("classname", "")
-                      msg = fl.get("message", "") or (fl.text or "lint error")
+                      msg = issue.get("message", "") or (issue.text or "lint error")
                       if len(msg) > 200:
                           msg = msg[:200] + "..."
                       errors.append(f"\u2022 `{classname}`: {msg}")
@@ -129,27 +128,22 @@ jobs:
           except (FileNotFoundError, ET.ParseError):
               pass
 
-          # Fallback: if job failed but JUnit found nothing, read lint-output.txt
-          # (captured by the Capture Lint Errors step using the same Docker image)
+          # Fallback: if job failed but JUnit found nothing, try raw text
           if not errors and job_status != "success":
-              for fallback_file in ["lint-output.txt", "junit.xml"]:
-                  if errors:
-                      break
-                  try:
-                      with open(fallback_file, "r", errors="replace") as f:
-                          for line in f:
-                              line = line.strip()
-                              if lua_error_re.search(line):
-                                  if len(line) > 200:
-                                      line = line[:200] + "..."
-                                  errors.append(f"\u2022 `{line}`")
-                                  failed += 1
-                  except FileNotFoundError:
-                      pass
+              try:
+                  with open("junit.xml", "r", errors="replace") as jf:
+                      for line in jf:
+                          line = line.strip()
+                          if lua_error_re.search(line):
+                              if len(line) > 200:
+                                  line = line[:200] + "..."
+                              errors.append(f"\u2022 `{line}`")
+                              failed += 1
+              except FileNotFoundError:
+                  pass
               if not errors:
                   errors.append(f"\u2022 Lint failed \u2014 check the [workflow run](https://github.com/{repo}/actions/runs/{run_id}) for details")
                   failed = 1
-          # AG UPDATE END
 
           # Build description
           if job_status == "success":
@@ -178,7 +172,6 @@ jobs:
 
           desc = "\n".join(lines)
 
-          # Discord limits embed description to 4096 chars
           if len(desc) > 4000:
               desc = desc[:4000] + "\n... (truncated)"
 
