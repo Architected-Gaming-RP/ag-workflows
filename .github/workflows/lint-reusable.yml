@@ -147,6 +147,8 @@ jobs:
               lines.extend(errors[:10])
               if len(errors) > 10:
                   lines.append(f"... and {len(errors) - 10} more")
+              lines.append("")
+              lines.append("*False positive? Add a `.lintignore` file to the repo root with one glob pattern per line to exclude files.*")
 
           desc = "\n".join(lines)
 
