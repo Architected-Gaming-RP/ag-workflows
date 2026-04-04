@@ -32,11 +32,4 @@ jobs:
     secrets: inherit
 ```
 
-**Discord notifications** are sent via two org-level secrets (set on the Architected-Gaming-RP org, inherited by all repos via `secrets: inherit`):
-
-| Secret | Fires on | Discord Channel Purpose |
-|--------|----------|------------------------|
-| `DISCORD_LINT_WEBHOOK` | Every run (pass + fail) | All lint results — visibility into what's being pushed |
-| `DISCORD_LINT_ERRORS_WEBHOOK` | Failures only | Errors channel — only surfaces problems that need attention |
-
-Both secrets are optional — the workflow handles missing secrets gracefully.
+**Discord notifications** are sent via two org-level secrets (`DISCORD_LINT_WEBHOOK` and `DISCORD_LINT_ERRORS_WEBHOOK`), inherited by all repos via `secrets: inherit`. Both are optional — the workflow handles missing secrets gracefully.
