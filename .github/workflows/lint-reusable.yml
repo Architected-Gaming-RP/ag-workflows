@@ -92,7 +92,10 @@ jobs:
           run_id = os.environ["RUN_ID"]
           short_sha = sha[:7]
 
-          # AG [I] 04APR26 - UPDATE - Parse JUnit XML, then fallback to raw text if job failed but no errors found
+          # AG [I] 04APR26 - UPDATE - Parse JUnit XML + regex fallback for syntax errors
+          import re
+          lua_error_re = re.compile(r'\S+\.lua:\d+:\d+:')
+
           # Parse JUnit results
           passed = 0
           failed = 0
@@ -113,21 +116,22 @@ jobs:
           except (FileNotFoundError, ET.ParseError):
               pass
 
-          # Fallback: job failed but JUnit found nothing (syntax errors produce
-          # valid-but-empty XML or malformed XML — either way, errors list is empty)
+          # Fallback: job failed but JUnit found 0 errors.
+          # Syntax errors produce valid-but-empty JUnit XML (0 testcases) or
+          # malformed XML. Either way the JUnit parser finds nothing.
+          # Read raw file and match only actual Lua error lines: file.lua:N:N: msg
           if not errors and job_status != "success":
               try:
                   with open("junit.xml", "r", errors="replace") as jf:
                       for line in jf:
                           line = line.strip()
-                          if line and not line.startswith("<") and not line.startswith("<?"):
+                          if lua_error_re.search(line):
                               if len(line) > 200:
                                   line = line[:200] + "..."
                               errors.append(f"\u2022 `{line}`")
                               failed += 1
               except FileNotFoundError:
                   pass
-              # If still nothing, add a generic pointer to the run
               if not errors:
                   errors.append(f"\u2022 Lint failed \u2014 check the [workflow run](https://github.com/{repo}/actions/runs/{run_id}) for details")
                   failed = 1
