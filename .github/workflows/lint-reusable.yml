@@ -1,0 +1,124 @@
+name: Lint (Reusable)
+
+on:
+  workflow_call:
+    secrets:
+      DISCORD_LINT_WEBHOOK:
+        required: false
+
+jobs:
+  lint:
+    name: Lint Resource
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Lint
+        uses: iLLeniumStudios/fivem-lua-lint-action@v2
+        with:
+          capture: "junit.xml"
+          args: "-t --formatter JUnit"
+          extra_libs: ox_lib+mysql+qblocales+qbox+qbox_playerdata+qbox_lib
+
+      - name: Generate Lint Report
+        if: always()
+        uses: mikepenz/action-junit-report@v4
+        with:
+          report_paths: "**/junit.xml"
+          check_name: Linting Report
+          fail_on_failure: true
+
+      - name: Parse Lint Results
+        if: always()
+        id: parse
+        run: |
+          if [ ! -f junit.xml ]; then
+            echo "summary=No lint output found" >> "$GITHUB_OUTPUT"
+            echo "errors=" >> "$GITHUB_OUTPUT"
+            echo "passed=0" >> "$GITHUB_OUTPUT"
+            echo "failed=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          TOTAL=$(grep -c '<testcase' junit.xml 2>/dev/null || echo "0")
+          FAILURES=$(grep -c '<failure' junit.xml 2>/dev/null || echo "0")
+          PASSED=$((TOTAL - FAILURES))
+
+          echo "passed=$PASSED" >> "$GITHUB_OUTPUT"
+          echo "failed=$FAILURES" >> "$GITHUB_OUTPUT"
+
+          if [ "$FAILURES" -gt 0 ]; then
+            # Extract error details: file, line, message
+            ERRORS=$(python3 -c "
+          import xml.etree.ElementTree as ET
+          tree = ET.parse('junit.xml')
+          errors = []
+          for tc in tree.iter('testcase'):
+              failure = tc.find('failure')
+              if failure is not None:
+                  name = tc.get('name', 'unknown')
+                  classname = tc.get('classname', '')
+                  msg = failure.get('message', failure.text or 'lint error')
+                  # Truncate long messages
+                  if len(msg) > 200:
+                      msg = msg[:200] + '...'
+                  errors.append(f'• \`{classname}\`: {msg}')
+          # Limit to 10 errors to fit Discord embed
+          output = chr(10).join(errors[:10])
+          if len(errors) > 10:
+              output += f'{chr(10)}... and {len(errors) - 10} more'
+          print(output)
+          " 2>/dev/null || echo "Failed to parse error details")
+
+            # Use a delimiter for multiline output
+            EOF_MARKER=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+            echo "errors<<${EOF_MARKER}" >> "$GITHUB_OUTPUT"
+            echo "$ERRORS" >> "$GITHUB_OUTPUT"
+            echo "${EOF_MARKER}" >> "$GITHUB_OUTPUT"
+          else
+            echo "errors=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Discord Notification
+        if: always()
+        run: |
+          PASSED="${{ steps.parse.outputs.passed }}"
+          FAILED="${{ steps.parse.outputs.failed }}"
+          ERRORS="${{ steps.parse.outputs.errors }}"
+
+          if [ "${{ job.status }}" = "success" ]; then
+            COLOR=3066993
+            STATUS="✅ Passed"
+          else
+            COLOR=15158332
+            STATUS="❌ Failed"
+          fi
+
+          DESC="${STATUS}\n\n"
+          DESC+="**Tests:** ${PASSED} passed"
+          if [ "$FAILED" != "0" ] && [ -n "$FAILED" ]; then
+            DESC+=", ${FAILED} failed"
+          fi
+          DESC+="\n**Branch:** \`${{ github.ref_name }}\`"
+          DESC+="\n**Commit:** [\`${GITHUB_SHA:0:7}\`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})"
+          DESC+="\n**By:** ${{ github.actor }}"
+
+          if [ -n "$ERRORS" ]; then
+            DESC+="\n\n**Errors:**\n${ERRORS}"
+          fi
+
+          # Escape for JSON
+          DESC_JSON=$(echo "$DESC" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read())[1:-1])")
+
+          PAYLOAD="{\"embeds\":[{\"title\":\"Lint — ${{ github.repository }}\",\"description\":\"${DESC_JSON}\",\"color\":${COLOR},\"url\":\"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}]}"
+
+          WEBHOOK="${{ secrets.DISCORD_LINT_WEBHOOK }}"
+          if [ -n "$WEBHOOK" ]; then
+            curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK"
+          else
+            echo "::warning::DISCORD_LINT_WEBHOOK secret not set — skipping Discord notification"
+          fi
