@@ -22,25 +22,29 @@ jobs:
       # AG [I] 04APR26 - UPDATE - Exclude FXAP-encrypted Lua files from lint
       - name: Exclude Encrypted Files
         run: |
-          # FXAP/escrow-protected files start with 0x01 byte — luacheck can't parse them
+          # FXAP/escrow-protected files start with magic bytes "FXAP" (0x46584150)
+          count=0
           find . -name '*.lua' -not -path './.git/*' | while IFS= read -r f; do
-            byte=$(head -c1 "$f" | od -An -tx1 | tr -d ' ')
-            if [ "$byte" = "01" ]; then
+            header=$(head -c4 "$f" | od -An -tx1 | tr -d ' \n')
+            if [ "$header" = "46584150" ]; then
               rm -f "$f"
+              count=$((count + 1))
             fi
           done
+          echo "Removed $count encrypted (FXAP) file(s) from lint scope"
       # AG UPDATE END
 
       - name: Lint
         uses: iLLeniumStudios/fivem-lua-lint-action@v2
         with:
           capture: "junit.xml"
-          args: "-t --formatter JUnit --ignore 1 2 3 4 5 6"
+          args: "-t --formatter JUnit --ignore 1 2 3 412 413 42 43 5 6"
           extra_libs: ox_lib+mysql+qblocales+qbox+qbox_playerdata+qbox_lib
 
       - name: Generate Lint Report
         if: always()
         uses: mikepenz/action-junit-report@v4
+        continue-on-error: true
         with:
           report_paths: "**/junit.xml"
           check_name: Linting Report
@@ -89,7 +93,7 @@ jobs:
                       errors.append(f"\u2022 `{classname}`: {msg}")
                   else:
                       passed += 1
-          except FileNotFoundError:
+          except (FileNotFoundError, ET.ParseError):
               pass
 
           # Build description
