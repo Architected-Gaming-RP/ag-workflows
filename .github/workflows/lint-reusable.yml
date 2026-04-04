@@ -152,22 +152,28 @@ jobs:
               }]
           })
 
-          # Both webhooks only fire on failures
+          # AG [I] 04APR26 - UPDATE - DISCORD_LINT_WEBHOOK fires on all runs, ERRORS_WEBHOOK on failures only
+          def send(wh_url):
+              if not wh_url:
+                  return
+              req = urllib.request.Request(
+                  wh_url,
+                  data=payload.encode(),
+                  headers={
+                      "Content-Type": "application/json",
+                      "User-Agent": "AG-Lint-Bot/1.0"
+                  },
+                  method="POST"
+              )
+              try:
+                  urllib.request.urlopen(req)
+              except Exception as e:
+                  print(f"::warning::Discord webhook failed: {e}")
+
+          # Main webhook: every run (pass + fail)
+          send(webhook)
+          # Errors webhook: failures only
           if failed > 0:
-              for wh_url in [webhook, errors_webhook]:
-                  if not wh_url:
-                      continue
-                  req = urllib.request.Request(
-                      wh_url,
-                      data=payload.encode(),
-                      headers={
-                          "Content-Type": "application/json",
-                          "User-Agent": "AG-Lint-Bot/1.0"
-                      },
-                      method="POST"
-                  )
-                  try:
-                      urllib.request.urlopen(req)
-                  except Exception as e:
-                      print(f"::warning::Discord webhook failed: {e}")
+              send(errors_webhook)
+          # AG UPDATE END
           PYEOF
