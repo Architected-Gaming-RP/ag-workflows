@@ -2,6 +2,31 @@
 <!-- Created: 2026-04-04 | Format reference — see REFS/AG-Code-Updates.template.md -->
 
 ================================================================================
+AG UPDATE - 04APR26 - Root cause fix: --ignore arg order consuming file path
+================================================================================
+
+## 04APR26: Root Cause — --ignore Consuming File Path Argument
+
+**Problem Report:** Discord lint notifications showed no error details for syntax errors. Multiple fix attempts (fallback parsers, `<error>` element handling) failed because the actual problem was upstream: `junit.xml` contained luacheck's usage/help text instead of JUnit XML.
+
+**Investigation:** Downloaded `junit.xml` as a GH Actions artifact [tool: gh run download]. File contained `Usage: luacheck ... Error: missing argument 'files'` — not XML at all. Traced to the action's entrypoint which constructs: `luacheck ... --formatter JUnit --ignore 1 2 3 4 5 6 .` — the `--ignore` flag takes multiple args (`--ignore <patt> [<patt>] ...`) and was consuming the `.` file path as an ignore pattern. The second exec worked because the entrypoint appends `--formatter default` between `--ignore` patterns and `.`, breaking the chain. [read: entrypoint.sh, tool: GH Actions log exec commands]
+
+**Root Cause:** Arg order. `--ignore 1 2 3 4 5 6` was the last option before the `.` file path. Luacheck's argparse consumed `.` as a 7th ignore pattern, leaving no file argument. This was introduced when `--ignore 1 2 3 4 5 6` was added to suppress warnings.
+
+**What Changed:**
+- `lint-reusable.yml:57` — Reordered args from `-t --formatter JUnit --ignore 1 2 3 4 5 6` to `-t --ignore 1 2 3 4 5 6 --formatter JUnit`. Now `--formatter` breaks the `--ignore` chain before the file path in both execs.
+
+**Additional changes in this session:**
+- Webhook split: `DISCORD_LINT_WEBHOOK` fires on all runs, `DISCORD_LINT_ERRORS_WEBHOOK` on failures only
+- Parser checks both `<failure>` and `<error>` JUnit elements
+- Raw-text fallback + generic message as last resort
+- `timeout=10` on webhook urlopen
+- Errors webhook gate uses `failed > 0 or job_status == "failure"`
+- Simplified false-positive hint text
+
+---
+
+================================================================================
 AG UPDATE - 04APR26 - Fix: JUnit fallback parsing + errors webhook job_status gate
 ================================================================================
 
