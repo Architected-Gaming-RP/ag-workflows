@@ -92,7 +92,7 @@ jobs:
           run_id = os.environ["RUN_ID"]
           short_sha = sha[:7]
 
-          # AG [I] 04APR26 - UPDATE - Fallback raw-text parsing when JUnit XML is malformed (syntax errors produce invalid XML)
+          # AG [I] 04APR26 - UPDATE - Parse JUnit XML, then fallback to raw text if job failed but no errors found
           # Parse JUnit results
           passed = 0
           failed = 0
@@ -100,30 +100,37 @@ jobs:
           try:
               tree = ET.parse("junit.xml")
               for tc in tree.iter("testcase"):
-                  f = tc.find("failure")
-                  if f is not None:
+                  fl = tc.find("failure")
+                  if fl is not None:
                       failed += 1
                       classname = tc.get("classname", "")
-                      msg = f.get("message", "") or (f.text or "lint error")
+                      msg = fl.get("message", "") or (fl.text or "lint error")
                       if len(msg) > 200:
                           msg = msg[:200] + "..."
                       errors.append(f"\u2022 `{classname}`: {msg}")
                   else:
                       passed += 1
           except (FileNotFoundError, ET.ParseError):
-              # JUnit XML missing or malformed (syntax errors produce invalid XML)
-              # Fall back to raw text extraction
+              pass
+
+          # Fallback: job failed but JUnit found nothing (syntax errors produce
+          # valid-but-empty XML or malformed XML — either way, errors list is empty)
+          if not errors and job_status != "success":
               try:
-                  with open("junit.xml", "r", errors="replace") as f:
-                      for line in f:
+                  with open("junit.xml", "r", errors="replace") as jf:
+                      for line in jf:
                           line = line.strip()
-                          if ".lua:" in line and ("expected" in line or "near" in line or "E0" in line):
+                          if line and not line.startswith("<") and not line.startswith("<?"):
                               if len(line) > 200:
                                   line = line[:200] + "..."
                               errors.append(f"\u2022 `{line}`")
                               failed += 1
               except FileNotFoundError:
                   pass
+              # If still nothing, add a generic pointer to the run
+              if not errors:
+                  errors.append(f"\u2022 Lint failed \u2014 check the [workflow run](https://github.com/{repo}/actions/runs/{run_id}) for details")
+                  failed = 1
           # AG UPDATE END
 
           # Build description
