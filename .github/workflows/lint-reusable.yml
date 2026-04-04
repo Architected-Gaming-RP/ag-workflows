@@ -38,7 +38,7 @@ jobs:
         uses: iLLeniumStudios/fivem-lua-lint-action@v2
         with:
           capture: "junit.xml"
-          args: "-t --formatter JUnit --ignore 1 2 311 312 313 32 33 34 412 413 42 43 5 6"
+          args: "-t --formatter JUnit --ignore 1 2 3 4 5 6"
           extra_libs: ox_lib+mysql+qblocales+qbox+qbox_playerdata+qbox_lib
 
       - name: Generate Lint Report
